@@ -132,14 +132,29 @@ class OctopusSpain:
 
         headers = {"authorization": self._token}
         client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
-        response = await client.execute_async(query, variables)
+        
+        try:
+            response = await client.execute_async(query, variables)
+        except Exception as e:
+            print(f"Error fetching consumption: {e}")
+            return 0
 
         total_consumption = 0
         
-        if "data" in response and response["data"]["account"] and response["data"]["account"]["properties"]:
-             for property in response["data"]["account"]["properties"]:
-                 for point in property["electricitySupplyPoints"]:
-                     for reading in point["halfHourlyReadings"]:
-                         total_consumption += float(reading["value"])
+        if "errors" in response:
+            print(f"GraphQL errors in consumption query: {response['errors']}")
+            return 0
+        
+        try:
+            if "data" in response and response["data"] and response["data"]["account"] and response["data"]["account"]["properties"]:
+                 for property in response["data"]["account"]["properties"]:
+                     if "electricitySupplyPoints" in property:
+                         for point in property["electricitySupplyPoints"]:
+                             if "halfHourlyReadings" in point:
+                                 for reading in point["halfHourlyReadings"]:
+                                     total_consumption += float(reading["value"])
+        except Exception as e:
+            print(f"Error parsing consumption data: {e}, Response: {response}")
+            return 0
                          
         return total_consumption
