@@ -239,15 +239,21 @@ class OctopusSpain:
                          if "edges" in connection:
                              readings = [edge["node"] for edge in connection["edges"]]
                              
+                             _LOGGER.warning(f"Pablo: Found {len(readings)} measurements for property.")
+                             
                              if readings:
                                  # Sort by date
                                  readings.sort(key=lambda x: x["readAt"])
+                                 
+                                 _LOGGER.warning(f"Pablo: First Reading: {readings[0]}")
+                                 _LOGGER.warning(f"Pablo: Last Reading: {readings[-1]}")
                                  
                                  start_val = float(readings[0]["value"])
                                  end_val = float(readings[-1]["value"])
                                  
                                  # Calculate difference
                                  diff = end_val - start_val
+                                 _LOGGER.warning(f"Pablo: Calculated Diff: {diff}")
                                  
                                  # Convert units if needed (Wh to kWh)
                                  first_unit = readings[0].get("unit", "").lower()
@@ -258,6 +264,7 @@ class OctopusSpain:
                                      
                                  if diff > 0:
                                      total_consumption += diff
+                                     _LOGGER.warning(f"Pablo: Added to total: {diff} (Total: {total_consumption})")
                                      
         except Exception as e:
             _LOGGER.error(f"Pablo: Error parsing measurements: {e}")
