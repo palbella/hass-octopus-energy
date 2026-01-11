@@ -4,7 +4,7 @@ import logging
 from lib.octopus_spain import OctopusSpain
 from secret import ACCOUNT_EMAIL, ACCOUNT_PASSWORD
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 _LOGGER = logging.getLogger(__name__)
 
 async def inspect_schema():
@@ -69,6 +69,32 @@ async def inspect_schema():
         _LOGGER.debug(f"ElectricitySupplyPoint fields: {fields}")
     else:
         _LOGGER.debug(f"Failed to introspect ElectricitySupplyPoint: {result}")
+
+    # Introspect Agreement
+    query = """
+    query {
+      __type(name: "Agreement") {
+        name
+        fields {
+          name
+          type {
+            name
+            kind
+            ofType {
+              name
+              kind
+            }
+          }
+        }
+      }
+    }
+    """
+    
+    _LOGGER.debug("Introspecting Agreement...")
+    result = await octopus._client.execute_async(query)
+    if "data" in result and result["data"]["__type"]:
+        fields = [f["name"] for f in result["data"]["__type"]["fields"]]
+        _LOGGER.debug(f"Agreement fields: {fields}")
 
 if __name__ == "__main__":
     asyncio.run(inspect_schema())
