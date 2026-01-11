@@ -115,15 +115,13 @@ class OctopusSpain:
         }
 
     async def current_consumption(self, account: str, start: datetime):
-        # Step 1: Get Meter IDs
-        query_meters = """
+        # Step 1: Get Meter IDs (Using CUPS as proxy for Meter ID)
+        query_cups = """
             query ($account: String!) {
               account(accountNumber: $account) {
                 properties {
-                  electricityMeterPoints {
-                    meters {
-                      id
-                    }
+                  electricitySupplyPoints {
+                    cups
                   }
                 }
               }
@@ -134,28 +132,29 @@ class OctopusSpain:
         client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
         
         try:
-             response_meters = await client.execute_async(query_meters, {"account": account})
+             response_cups = await client.execute_async(query_cups, {"account": account})
         except Exception as e:
-             _LOGGER.error(f"Pablo: Error fetching meters: {e}")
+             _LOGGER.error(f"Pablo: Error fetching CUPS: {e}")
              return 0
 
-        if "errors" in response_meters:
-             _LOGGER.error(f"Pablo: GraphQL errors in meters query: {response_meters['errors']}")
+        if "errors" in response_cups:
+             _LOGGER.error(f"Pablo: GraphQL errors in CUPS query: {response_cups['errors']}")
              return 0
              
+        # Use CUPS as meter identifiers
         meter_ids = []
         try:
-            if "data" in response_meters and response_meters["data"]["account"]:
-                 for property in response_meters["data"]["account"]["properties"]:
-                     if "electricityMeterPoints" in property:
-                         for point in property["electricityMeterPoints"]:
-                             for meter in point["meters"]:
-                                 meter_ids.append(meter["id"])
+            if "data" in response_cups and response_cups["data"]["account"]:
+                 for property in response_cups["data"]["account"]["properties"]:
+                     if "electricitySupplyPoints" in property:
+                         for point in property["electricitySupplyPoints"]:
+                             if "cups" in point:
+                                 meter_ids.append(point["cups"])
         except Exception as e:
-            _LOGGER.error(f"Pablo: Error parsing meters: {e}")
+            _LOGGER.error(f"Pablo: Error parsing CUPS: {e}")
 
         if not meter_ids:
-            _LOGGER.error("Pablo: No meters found for consumption query")
+            _LOGGER.error("Pablo: No supply points (CUPS) found for consumption query")
             return 0
 
         # Step 2: Get Readings for each meter
