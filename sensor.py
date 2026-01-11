@@ -57,6 +57,10 @@ class OctopusCoordinator(DataUpdateCoordinator):
         if await self._api.login():
             self._data = {}
             accounts = await self._api.accounts()
+            
+            if not accounts:
+                _LOGGER.error("Pablo: No accounts found")
+
             for account in accounts:
                 self._data[account] = await self._api.account(account)
                 
@@ -73,11 +77,15 @@ class OctopusCoordinator(DataUpdateCoordinator):
                 # Convert to datetime at start of day
                 start_datetime = datetime.combine(start_date, datetime.min.time())
                 
+                _LOGGER.debug(f"Pablo: Consumption date calc - Last Invoice End: {last_invoice_end}, Start Date: {start_date}")
+                
                 try:
                     self._data[account]['current_consumption'] = await self._api.current_consumption(account, start_datetime)
                 except Exception as e:
                     _LOGGER.error(f"Failed to update consumption for account {account}: {e}")
                     self._data[account]['current_consumption'] = 0
+        else:
+             _LOGGER.error("Pablo: Login failed")
 
         return self._data
 
