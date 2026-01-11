@@ -1,5 +1,5 @@
 import logging
-import logging
+
 from datetime import timedelta, datetime
 from typing import Mapping, Any
 
@@ -14,6 +14,7 @@ from homeassistant.const import (
     CURRENCY_EURO,
 )
 
+from homeassistant.components.sensor import (
     SensorEntityDescription, SensorEntity, SensorStateClass
 )
 from homeassistant.const import (
