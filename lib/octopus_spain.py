@@ -86,7 +86,8 @@ class OctopusSpain:
 
         if len(invoices) == 0:
             return {
-                'solar_wallet': None,
+                'solar_wallet': (float(solar_wallet["balance"]) / 100),
+                'octopus_credit': (float(electricity["balance"]) / 100),
                 'last_invoice': {
                     'amount': None,
                     'issued': None,
