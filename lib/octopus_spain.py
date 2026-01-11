@@ -108,3 +108,38 @@ class OctopusSpain:
                 "end": (datetime.fromisoformat(invoice["consumptionEndDate"]) - timedelta(seconds=1)).date(),
             },
         }
+
+    async def current_consumption(self, account: str, start: datetime):
+        query = """
+            query ($account: String!, $start: DateTime!, $end: DateTime!) {
+              account(accountNumber: $account) {
+                properties {
+                  electricitySupplyPoints {
+                    halfHourlyReadings(from: $start, to: $end) {
+                      value
+                    }
+                  }
+                }
+              }
+            }
+        """
+        now = datetime.now()
+        variables = {
+            "account": account,
+            "start": start.isoformat(),
+            "end": now.isoformat()
+        }
+
+        headers = {"authorization": self._token}
+        client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
+        response = await client.execute_async(query, variables)
+
+        total_consumption = 0
+        
+        if "data" in response and response["data"]["account"] and response["data"]["account"]["properties"]:
+             for property in response["data"]["account"]["properties"]:
+                 for point in property["electricitySupplyPoints"]:
+                     for reading in point["halfHourlyReadings"]:
+                         total_consumption += float(reading["value"])
+                         
+        return total_consumption

@@ -1,5 +1,6 @@
 import logging
-from datetime import timedelta
+import logging
+from datetime import timedelta, datetime
 from typing import Mapping, Any
 
 from homeassistant.helpers.typing import StateType
@@ -13,8 +14,10 @@ from homeassistant.const import (
     CURRENCY_EURO,
 )
 
-from homeassistant.components.sensor import (
     SensorEntityDescription, SensorEntity, SensorStateClass
+)
+from homeassistant.const import (
+    UnitOfEnergy,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -37,6 +40,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         sensors.append(OctopusWallet(account, 'solar_wallet', 'Solar Wallet', coordinator, len(accounts) == 1))
         sensors.append(OctopusWallet(account, 'octopus_credit', 'Octopus Credit', coordinator, len(accounts) == 1))
         sensors.append(OctopusInvoice(account, coordinator, len(accounts) == 1))
+        sensors.append(OctopusConsumption(account, coordinator, len(accounts) == 1))
 
     async_add_entities(sensors)
 
@@ -54,6 +58,21 @@ class OctopusCoordinator(DataUpdateCoordinator):
             accounts = await self._api.accounts()
             for account in accounts:
                 self._data[account] = await self._api.account(account)
+                
+                # Calculate consumption
+                last_invoice_end = self._data[account]['last_invoice']['end']
+                
+                if last_invoice_end:
+                    # Start from the next day after the last invoice
+                    start_date = last_invoice_end + timedelta(days=1)
+                else:
+                    # Default to 30 days ago if no invoice
+                    start_date = datetime.now().date() - timedelta(days=30)
+                
+                # Convert to datetime at start of day
+                start_datetime = datetime.combine(start_date, datetime.min.time())
+                
+                self._data[account]['current_consumption'] = await self._api.current_consumption(account, start_datetime)
 
         return self._data
 
@@ -129,3 +148,34 @@ class OctopusInvoice(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         return self._attrs
+
+
+class OctopusConsumption(CoordinatorEntity, SensorEntity):
+
+    def __init__(self, account: str, coordinator, single: bool):
+        super().__init__(coordinator=coordinator)
+        self._state = None
+        self._account = account
+        self._attr_name = "Consumo Actual" if single else f"Consumo Actual ({account})"
+        self._attr_unique_id = f"current_consumption_{account}"
+        self.entity_description = SensorEntityDescription(
+            key=f"current_consumption_{account}",
+            icon="mdi:lightning-bolt",
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            state_class=SensorStateClass.TOTAL,
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._handle_coordinator_update()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        if 'current_consumption' in self.coordinator.data[self._account]:
+            self._state = self.coordinator.data[self._account]['current_consumption']
+            self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:
+        return self._state
