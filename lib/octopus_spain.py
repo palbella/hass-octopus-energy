@@ -43,32 +43,38 @@ class OctopusSpain:
         return True
 
     async def _log_schema_debug_info(self):
-        _LOGGER.warning("Pablo: STARTING SCHEMA INSPECTION (Internal)")
+        _LOGGER.warning("Pablo: STARTING TARGETED SCHEMA INSPECTION (Internal)")
         
         headers = {"authorization": self._token}
         client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
 
-        types_to_inspect = ["Account", "PropertyType", "ElectricitySupplyPoint", "Agreement", "Meter", "Reading", "ElectricityMeterPoint"]
+        types_to_inspect = ["SIPSElectricityData", "SIPSElectricityMonthlyConsumption", "Measurement", "MeasurementType", "Reading"]
         
-        # 1. Root Query
-        query_root = """
+        # 1. Inspect arguments for sipsData query
+        query_args = """
         query {
-          __schema {
-            queryType {
-              fields {
+          __type(name: "Query") {
+            fields {
+              name
+              args {
                 name
+                type {
+                  name
+                  kind
+                }
               }
             }
           }
         }
         """
         try:
-            res = await client.execute_async(query_root)
-            if "data" in res and res["data"]["__schema"]["queryType"]:
-                 fields = [f["name"] for f in res["data"]["__schema"]["queryType"]["fields"]]
-                 _LOGGER.warning(f"Pablo: Root Query Fields: {sorted(fields)}")
+            res = await client.execute_async(query_args)
+            if "data" in res and res["data"]["__type"] and res["data"]["__type"]["fields"]:
+                 for field in res["data"]["__type"]["fields"]:
+                     if field["name"] == "sipsData":
+                         _LOGGER.warning(f"Pablo: Arguments for sipsData: {[arg['name'] for arg in field['args']]}")
         except Exception as e:
-            _LOGGER.warning(f"Pablo: Failed to inspect Root Query: {e}")
+            _LOGGER.warning(f"Pablo: Failed to inspect sipsData args: {e}")
 
         # 2. Types
         for type_name in types_to_inspect:
@@ -100,7 +106,7 @@ class OctopusSpain:
             except Exception as e:
                 _LOGGER.warning(f"Pablo: Failed to inspect {type_name}: {e}")
         
-        _LOGGER.warning("Pablo: END SCHEMA INSPECTION")
+        _LOGGER.warning("Pablo: END TARGETED SCHEMA INSPECTION")
 
     async def accounts(self):
         query = """
