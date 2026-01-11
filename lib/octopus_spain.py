@@ -234,23 +234,28 @@ class OctopusSpain:
         
         total_consumption = 0
         
-        # Note: We rely on the field 'consumptionKwh' based on typical naming. 
-        # If this field is wrong, the introspection logs will help us correct it.
+        # We need to specify market (likely "ELECTRICITY") and use an inline fragment because sipsData returns a Union/Interface.
         query_sips = """
-            query ($cups: String!) {
-                sipsData(cups: $cups) {
-                    monthlyConsumptions {
-                        startDate
-                        endDate
-                        consumptionKwh
+            query ($cups: String!, $market: String!) {
+                sipsData(cups: $cups, market: $market) {
+                    ... on SIPSElectricityData {
+                        monthlyConsumptions {
+                            startDate
+                            endDate
+                            activeEnergyConsumptionWhP1
+                            activeEnergyConsumptionWhP2
+                            activeEnergyConsumptionWhP3
+                        }
                     }
                 }
             }
         """
 
         for cups_id in meter_ids:
+            # We assume "ELECTRICITY" is the correct market string based on context.
             variables = {
-                "cups": cups_id
+                "cups": cups_id,
+                "market": "ELECTRICITY"
             }
             try:
                 response = await client.execute_async(query_sips, variables)
@@ -263,21 +268,22 @@ class OctopusSpain:
                 if sips_data and "monthlyConsumptions" in sips_data:
                     monthly_consumptions = sips_data["monthlyConsumptions"]
                     
-                    # Filter for consumptions overlapping with our start date
-                    # sipsData is monthly, so we might get specific months.
-                    # We'll take any consumption where the period ends AFTER our start date.
-                    
                     for month_data in monthly_consumptions:
                          try:
-                             # Ensure we parse dates correctly (assuming ISO or YYYY-MM-DD)
+                             # Ensure we parse dates correctly
                              end_date_str = month_data.get("endDate")
                              if end_date_str:
-                                 # Truncate time part if present for simple date comparison
                                  month_end = datetime.fromisoformat(end_date_str).date() if "T" in end_date_str else datetime.strptime(end_date_str, "%Y-%m-%d").date()
                                  
                                  if month_end >= start.date():
-                                     kwh = float(month_data.get("consumptionKwh", 0))
-                                     total_consumption += kwh
+                                     # Sum P1, P2, P3 (in Wh) and convert to kWh
+                                     p1 = float(month_data.get("activeEnergyConsumptionWhP1") or 0)
+                                     p2 = float(month_data.get("activeEnergyConsumptionWhP2") or 0)
+                                     p3 = float(month_data.get("activeEnergyConsumptionWhP3") or 0)
+                                     
+                                     total_wh = p1 + p2 + p3
+                                     total_consumption += (total_wh / 1000.0)
+                                     
                          except Exception as ex:
                              _LOGGER.warning(f"Pablo: Error parsing SIPS month data: {ex}")
 
