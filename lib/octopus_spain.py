@@ -115,52 +115,101 @@ class OctopusSpain:
         }
 
     async def current_consumption(self, account: str, start: datetime):
-        query = """
-            query ($account: String!, $start: DateTime!, $end: DateTime!) {
+        # Step 1: Get Meter IDs
+        query_meters = """
+            query ($account: String!) {
               account(accountNumber: $account) {
                 properties {
-                  electricitySupplyPoints {
-                    consumption(from: $start, to: $end) {
-                      kwh
+                  electricityMeterPoints {
+                    meters {
+                      id
                     }
                   }
                 }
               }
             }
         """
-        now = datetime.now()
-        variables = {
-            "account": account,
-            "start": start.isoformat(),
-            "end": now.isoformat()
-        }
-
+        
         headers = {"authorization": self._token}
         client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
         
         try:
-            response = await client.execute_async(query, variables)
+             response_meters = await client.execute_async(query_meters, {"account": account})
         except Exception as e:
-            _LOGGER.error(f"Pablo: Error fetching consumption: {e}")
+             _LOGGER.error(f"Pablo: Error fetching meters: {e}")
+             return 0
+
+        if "errors" in response_meters:
+             _LOGGER.error(f"Pablo: GraphQL errors in meters query: {response_meters['errors']}")
+             return 0
+             
+        meter_ids = []
+        try:
+            if "data" in response_meters and response_meters["data"]["account"]:
+                 for property in response_meters["data"]["account"]["properties"]:
+                     if "electricityMeterPoints" in property:
+                         for point in property["electricityMeterPoints"]:
+                             for meter in point["meters"]:
+                                 meter_ids.append(meter["id"])
+        except Exception as e:
+            _LOGGER.error(f"Pablo: Error parsing meters: {e}")
+
+        if not meter_ids:
+            _LOGGER.error("Pablo: No meters found for consumption query")
             return 0
 
+        # Step 2: Get Readings for each meter
         total_consumption = 0
+        now = datetime.now()
         
-        if "errors" in response:
-            _LOGGER.error(f"Pablo: GraphQL errors in consumption query: {response['errors']}")
-            return 0
-        
-        try:
-            if "data" in response and response["data"] and response["data"]["account"] and response["data"]["account"]["properties"]:
-                 for property in response["data"]["account"]["properties"]:
-                     if "electricitySupplyPoints" in property:
-                         for point in property["electricitySupplyPoints"]:
-                             if "consumption" in point:
-                                 consumptions = point["consumption"]
-                                 for consumption in consumptions:
-                                     total_consumption += float(consumption["kwh"])
-        except Exception as e:
-            _LOGGER.error(f"Pablo: Error parsing consumption data: {e}, Response: {response}")
-            return 0
-            
+        query_readings = """
+            query ($account: String!, $meter: String!, $start: DateTime!, $end: DateTime!) {
+                electricityMeterReadings(
+                    accountNumber: $account
+                    meterId: $meter
+                    readFrom: $start
+                    readTo: $end
+                ) {
+                    readAt
+                    value
+                }
+            }
+        """
+
+        for meter_id in meter_ids:
+            variables = {
+                "account": account,
+                "meter": meter_id,
+                "start": start.isoformat(),
+                "end": now.isoformat()
+            }
+            try:
+                response = await client.execute_async(query_readings, variables)
+                
+                if "errors" in response:
+                     _LOGGER.error(f"Pablo: Errors fetching readings for meter {meter_id}: {response['errors']}")
+                     continue
+                
+                readings = response.get("data", {}).get("electricityMeterReadings", [])
+                if readings:
+                    # Sort by date just in case
+                    readings.sort(key=lambda x: x["readAt"])
+                    
+                    # Calculate consumption as difference between last and first reading
+                    # Ensure values are floats
+                    start_value = float(readings[0]["value"])
+                    end_value = float(readings[-1]["value"])
+                    
+                    consumption = end_value - start_value
+                    # Handle potential meter wrap or resets if necessary? 
+                    # For now assume simple difference is valid for monthly consumption.
+                    if consumption < 0:
+                        _LOGGER.warning(f"Pablo: Negative consumption detected for meter {meter_id}: {consumption} (Start: {start_value}, End: {end_value})")
+                        consumption = 0 
+                        
+                    total_consumption += consumption
+                    
+            except Exception as e:
+                _LOGGER.error(f"Pablo: Error fetching readings for meter {meter_id}: {e}")
+
         return total_consumption
