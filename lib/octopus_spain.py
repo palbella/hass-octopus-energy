@@ -1,6 +1,10 @@
+import logging
+
 from datetime import datetime, timedelta
 
 from python_graphql_client import GraphqlClient
+
+_LOGGER = logging.getLogger(__name__)
 
 GRAPH_QL_ENDPOINT = "https://api.oees-kraken.energy/v1/graphql/"
 SOLAR_WALLET_LEDGER = "SOLAR_WALLET_LEDGER"
@@ -136,14 +140,15 @@ class OctopusSpain:
         
         try:
             response = await client.execute_async(query, variables)
+            _LOGGER.debug(f"Pablo: GraphQL Response for consumption: {response}")
         except Exception as e:
-            print(f"Error fetching consumption: {e}")
+            _LOGGER.debug(f"Pablo: Error fetching consumption: {e}")
             return 0
 
         total_consumption = 0
         
         if "errors" in response:
-            print(f"GraphQL errors in consumption query: {response['errors']}")
+            _LOGGER.debug(f"Pablo: GraphQL errors in consumption query: {response['errors']}")
             return 0
         
         try:
@@ -152,10 +157,13 @@ class OctopusSpain:
                      if "electricitySupplyPoints" in property:
                          for point in property["electricitySupplyPoints"]:
                              if "halfHourlyReadings" in point:
-                                 for reading in point["halfHourlyReadings"]:
+                                 readings = point["halfHourlyReadings"]
+                                 _LOGGER.debug(f"Pablo: Found {len(readings)} readings for point")
+                                 for reading in readings:
                                      total_consumption += float(reading["value"])
         except Exception as e:
-            print(f"Error parsing consumption data: {e}, Response: {response}")
+            _LOGGER.debug(f"Pablo: Error parsing consumption data: {e}, Response: {response}")
             return 0
-                         
+            
+        _LOGGER.debug(f"Pablo: Total calculated consumption: {total_consumption}")             
         return total_consumption
