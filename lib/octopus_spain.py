@@ -187,6 +187,40 @@ class OctopusSpain:
         }
 
     async def current_consumption(self, account: str, start: datetime):
+        headers = {"authorization": self._token}
+        client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
+        
+        # EXPERIMENT 1: Try getting ANY measurements (no dates) to verify existence and structure
+        _LOGGER.warning("Pablo: Expr 1 - Fetching recent measurements without date limits...")
+        
+        query_all = """
+            query ($account: String!) {
+              account(accountNumber: $account) {
+                properties {
+                  measurements(first: 10) {
+                    edges {
+                      node {
+                        readAt
+                        value
+                        unit
+                        source
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        """
+        try:
+            resp = await client.execute_async(query_all, {"account": account})
+            if "data" in resp and resp["data"]["account"]["properties"]:
+                for idx, prop in enumerate(resp["data"]["account"]["properties"]):
+                    meas = prop.get("measurements", {})
+                    edges = meas.get("edges", []) if meas else []
+                    _LOGGER.warning(f"Pablo: Property {idx} has {len(edges)} measurements (unfiltered). First: {edges[0] if edges else 'None'}")
+        except Exception as e:
+            _LOGGER.warning(f"Pablo: Expr 1 Failed: {e}")
+
         # Step 1: Use PropertyType.measurements with confirmed arguments and structure
         
         total_consumption = 0
@@ -218,8 +252,8 @@ class OctopusSpain:
             "end": now.date().isoformat()
         }
 
-        headers = {"authorization": self._token}
-        client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
+        # headers = {"authorization": self._token}  <- Removed redundant definition
+        # client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers) <- Removed redundant definition
         
         try:
             response = await client.execute_async(query_measurements, variables)
