@@ -198,7 +198,7 @@ class OctopusSpain:
             query ($account: String!, $start: DateTime!, $end: DateTime!) {
               account(accountNumber: $account) {
                 properties {
-                  measurements(startAt: $start, endAt: $end) {
+                  measurements(startAt: $start, endAt: $end, first: 3000) {
                     edges {
                       node {
                         readAt
