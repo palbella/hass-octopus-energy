@@ -187,20 +187,25 @@ class OctopusSpain:
         }
 
     async def current_consumption(self, account: str, start: datetime):
-        # Step 1: Use PropertyType.measurements
-        # This is a likely candidate for readings.
+        # Step 1: Use PropertyType.measurements with confirmed arguments and structure
         
         total_consumption = 0
         now = datetime.now()
         
+        # Arguments confirmed via introspection: startAt, endAt
+        # Structure confirmed: MeasurementConnection -> edges -> node -> [readAt, value, unit]
         query_measurements = """
             query ($account: String!, $start: DateTime!, $end: DateTime!) {
               account(accountNumber: $account) {
                 properties {
-                  measurements(from: $start, to: $end) {
-                    readAt
-                    value
-                    unit
+                  measurements(startAt: $start, endAt: $end) {
+                    edges {
+                      node {
+                        readAt
+                        value
+                        unit
+                      }
+                    }
                   }
                 }
               }
@@ -230,37 +235,30 @@ class OctopusSpain:
             if "data" in response and response["data"] and response["data"]["account"] and response["data"]["account"]["properties"]:
                  for property in response["data"]["account"]["properties"]:
                      if "measurements" in property and property["measurements"]:
-                         measurements = property["measurements"]
-                         
-                         # Determine if measurements are cumulative or interval
-                         # Measurements typically differ by type.
-                         # We'll log the first one to debug units.
-                         if len(measurements) > 0:
-                             first = measurements[0]
-                             _LOGGER.warning(f"Pablo: Debug Measurement Sample: {first}")
-                            
-                             # Logic: If unit is kWh/Wh, sum? Or Start/End diff?
-                             # For now, simplistic sum if many items, or diff if cumulative.
-                             # If "Reading", likely cumulative?
-                             # "Value" in MeasurementType.
+                         connection = property["measurements"]
+                         if "edges" in connection:
+                             readings = [edge["node"] for edge in connection["edges"]]
                              
-                             # Let's try simple difference of first/last if sorted?
-                             # Or just sum if it looks like interval data?
-                             # Without knowing, I'll assume cumulative readings for now (like a meter).
-                             
-                             measurements.sort(key=lambda x: x["readAt"])
-                             start_val = float(measurements[0]["value"])
-                             end_val = float(measurements[-1]["value"])
-                             diff = end_val - start_val
-                             
-                             # Convert units if needed (Wh to kWh)
-                             unit = first.get("unit", "").lower()
-                             if unit == "wh":
-                                 diff = diff / 1000.0
+                             if readings:
+                                 # Sort by date
+                                 readings.sort(key=lambda x: x["readAt"])
                                  
-                             if diff > 0:
-                                 total_consumption += diff
+                                 start_val = float(readings[0]["value"])
+                                 end_val = float(readings[-1]["value"])
                                  
+                                 # Calculate difference
+                                 diff = end_val - start_val
+                                 
+                                 # Convert units if needed (Wh to kWh)
+                                 first_unit = readings[0].get("unit", "").lower()
+                                 if first_unit == "wh":
+                                     diff = diff / 1000.0
+                                 elif first_unit == "kwh":
+                                     pass # already kWh
+                                     
+                                 if diff > 0:
+                                     total_consumption += diff
+                                     
         except Exception as e:
             _LOGGER.error(f"Pablo: Error parsing measurements: {e}")
             
