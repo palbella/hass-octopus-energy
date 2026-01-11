@@ -192,13 +192,13 @@ class OctopusSpain:
         total_consumption = 0
         now = datetime.now()
         
-        # Arguments confirmed via introspection: startAt, endAt
+        # Arguments confirmed via introspection: startOn, endOn (Dates)
         # Structure confirmed: MeasurementConnection -> edges -> node -> [readAt, value, unit]
         query_measurements = """
-            query ($account: String!, $start: DateTime!, $end: DateTime!) {
+            query ($account: String!, $start: Date!, $end: Date!) {
               account(accountNumber: $account) {
                 properties {
-                  measurements(startAt: $start, endAt: $end, first: 1000) {
+                  measurements(startOn: $start, endOn: $end, first: 1000) {
                     edges {
                       node {
                         readAt
@@ -214,8 +214,8 @@ class OctopusSpain:
 
         variables = {
             "account": account,
-            "start": start.isoformat(),
-            "end": now.isoformat()
+            "start": start.date().isoformat(),
+            "end": now.date().isoformat()
         }
 
         headers = {"authorization": self._token}
