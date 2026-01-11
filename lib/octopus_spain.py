@@ -120,8 +120,8 @@ class OctopusSpain:
               account(accountNumber: $account) {
                 properties {
                   electricitySupplyPoints {
-                    halfHourlyReadings(from: $start, to: $end) {
-                      value
+                    consumption(from: $start, to: $end) {
+                      kwh
                     }
                   }
                 }
@@ -140,15 +140,14 @@ class OctopusSpain:
         
         try:
             response = await client.execute_async(query, variables)
-            _LOGGER.debug(f"Pablo: GraphQL Response for consumption: {response}")
         except Exception as e:
-            _LOGGER.debug(f"Pablo: Error fetching consumption: {e}")
+            _LOGGER.error(f"Pablo: Error fetching consumption: {e}")
             return 0
 
         total_consumption = 0
         
         if "errors" in response:
-            _LOGGER.debug(f"Pablo: GraphQL errors in consumption query: {response['errors']}")
+            _LOGGER.error(f"Pablo: GraphQL errors in consumption query: {response['errors']}")
             return 0
         
         try:
@@ -156,14 +155,12 @@ class OctopusSpain:
                  for property in response["data"]["account"]["properties"]:
                      if "electricitySupplyPoints" in property:
                          for point in property["electricitySupplyPoints"]:
-                             if "halfHourlyReadings" in point:
-                                 readings = point["halfHourlyReadings"]
-                                 _LOGGER.debug(f"Pablo: Found {len(readings)} readings for point")
-                                 for reading in readings:
-                                     total_consumption += float(reading["value"])
+                             if "consumption" in point:
+                                 consumptions = point["consumption"]
+                                 for consumption in consumptions:
+                                     total_consumption += float(consumption["kwh"])
         except Exception as e:
-            _LOGGER.debug(f"Pablo: Error parsing consumption data: {e}, Response: {response}")
+            _LOGGER.error(f"Pablo: Error parsing consumption data: {e}, Response: {response}")
             return 0
             
-        _LOGGER.debug(f"Pablo: Total calculated consumption: {total_consumption}")             
         return total_consumption
