@@ -229,58 +229,59 @@ class OctopusSpain:
             _LOGGER.error("Pablo: No supply points (CUPS) found for consumption query")
             return 0
 
-        # Step 2: Get Readings for each meter
-        total_consumption = 0
-        now = datetime.now()
+        # Step 2: Get Consumption via SIPS (Spain-specific data)
+        # sipsData returns monthly consumption. We will filter relevant months.
         
-        query_readings = """
-            query ($account: String!, $meter: String!, $start: DateTime!, $end: DateTime!) {
-                electricityMeterReadings(
-                    accountNumber: $account
-                    meterId: $meter
-                    readFrom: $start
-                    readTo: $end
-                ) {
-                    readAt
-                    value
+        total_consumption = 0
+        
+        # Note: We rely on the field 'consumptionKwh' based on typical naming. 
+        # If this field is wrong, the introspection logs will help us correct it.
+        query_sips = """
+            query ($cups: String!) {
+                sipsData(cups: $cups) {
+                    monthlyConsumptions {
+                        startDate
+                        endDate
+                        consumptionKwh
+                    }
                 }
             }
         """
 
-        for meter_id in meter_ids:
+        for cups_id in meter_ids:
             variables = {
-                "account": account,
-                "meter": meter_id,
-                "start": start.isoformat(),
-                "end": now.isoformat()
+                "cups": cups_id
             }
             try:
-                response = await client.execute_async(query_readings, variables)
+                response = await client.execute_async(query_sips, variables)
                 
                 if "errors" in response:
-                     _LOGGER.error(f"Pablo: Errors fetching readings for meter {meter_id}: {response['errors']}")
+                     _LOGGER.error(f"Pablo: Errors fetching SIPS data for CUPS {cups_id}: {response['errors']}")
                      continue
                 
-                readings = response.get("data", {}).get("electricityMeterReadings", [])
-                if readings:
-                    # Sort by date just in case
-                    readings.sort(key=lambda x: x["readAt"])
+                sips_data = response.get("data", {}).get("sipsData", {})
+                if sips_data and "monthlyConsumptions" in sips_data:
+                    monthly_consumptions = sips_data["monthlyConsumptions"]
                     
-                    # Calculate consumption as difference between last and first reading
-                    # Ensure values are floats
-                    start_value = float(readings[0]["value"])
-                    end_value = float(readings[-1]["value"])
+                    # Filter for consumptions overlapping with our start date
+                    # sipsData is monthly, so we might get specific months.
+                    # We'll take any consumption where the period ends AFTER our start date.
                     
-                    consumption = end_value - start_value
-                    # Handle potential meter wrap or resets if necessary? 
-                    # For now assume simple difference is valid for monthly consumption.
-                    if consumption < 0:
-                        _LOGGER.warning(f"Pablo: Negative consumption detected for meter {meter_id}: {consumption} (Start: {start_value}, End: {end_value})")
-                        consumption = 0 
-                        
-                    total_consumption += consumption
-                    
+                    for month_data in monthly_consumptions:
+                         try:
+                             # Ensure we parse dates correctly (assuming ISO or YYYY-MM-DD)
+                             end_date_str = month_data.get("endDate")
+                             if end_date_str:
+                                 # Truncate time part if present for simple date comparison
+                                 month_end = datetime.fromisoformat(end_date_str).date() if "T" in end_date_str else datetime.strptime(end_date_str, "%Y-%m-%d").date()
+                                 
+                                 if month_end >= start.date():
+                                     kwh = float(month_data.get("consumptionKwh", 0))
+                                     total_consumption += kwh
+                         except Exception as ex:
+                             _LOGGER.warning(f"Pablo: Error parsing SIPS month data: {ex}")
+
             except Exception as e:
-                _LOGGER.error(f"Pablo: Error fetching readings for meter {meter_id}: {e}")
+                _LOGGER.error(f"Pablo: Error fetching SIPS data for CUPS {cups_id}: {e}")
 
         return total_consumption
