@@ -16,6 +16,7 @@ class OctopusSpain:
         self._email = email
         self._password = password
         self._token = None
+        self._schema_logged = False
 
     async def login(self):
         mutation = """
@@ -34,7 +35,72 @@ class OctopusSpain:
             return False
 
         self._token = response["data"]["obtainKrakenToken"]["token"]
+        
+        if not self._schema_logged:
+             await self._log_schema_debug_info()
+             self._schema_logged = True
+             
         return True
+
+    async def _log_schema_debug_info(self):
+        _LOGGER.warning("Pablo: STARTING SCHEMA INSPECTION (Internal)")
+        
+        headers = {"authorization": self._token}
+        client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
+
+        types_to_inspect = ["Account", "PropertyType", "ElectricitySupplyPoint", "Agreement", "Meter", "Reading", "ElectricityMeterPoint"]
+        
+        # 1. Root Query
+        query_root = """
+        query {
+          __schema {
+            queryType {
+              fields {
+                name
+              }
+            }
+          }
+        }
+        """
+        try:
+            res = await client.execute_async(query_root)
+            if "data" in res and res["data"]["__schema"]["queryType"]:
+                 fields = [f["name"] for f in res["data"]["__schema"]["queryType"]["fields"]]
+                 _LOGGER.warning(f"Pablo: Root Query Fields: {sorted(fields)}")
+        except Exception as e:
+            _LOGGER.warning(f"Pablo: Failed to inspect Root Query: {e}")
+
+        # 2. Types
+        for type_name in types_to_inspect:
+            query = f"""
+            query {{
+              __type(name: "{type_name}") {{
+                name
+                fields {{
+                  name
+                  type {{
+                    name
+                    kind
+                    ofType {{
+                      name
+                      kind
+                    }}
+                  }}
+                }}
+              }}
+            }}
+            """
+            try:
+                res = await client.execute_async(query)
+                if "data" in res and res["data"]["__type"] and res["data"]["__type"]["fields"]:
+                     fields = [f["name"] for f in res["data"]["__type"]["fields"]]
+                     _LOGGER.warning(f"Pablo: Fields on {type_name}: {sorted(fields)}")
+                else:
+                     _LOGGER.warning(f"Pablo: Type {type_name} not found or has no fields.")
+            except Exception as e:
+                _LOGGER.warning(f"Pablo: Failed to inspect {type_name}: {e}")
+        
+        _LOGGER.warning("Pablo: END SCHEMA INSPECTION")
 
     async def accounts(self):
         query = """
