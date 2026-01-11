@@ -50,10 +50,10 @@ class OctopusSpain:
 
         types_to_inspect = ["SIPSElectricityData", "SIPSElectricityMonthlyConsumption", "Measurement", "MeasurementType", "Reading"]
         
-        # 1. Inspect arguments for sipsData query
+        # Inspect arguments for PropertyType.measurements
         query_args = """
         query {
-          __type(name: "Query") {
+          __type(name: "PropertyType") {
             fields {
               name
               args {
@@ -71,10 +71,10 @@ class OctopusSpain:
             res = await client.execute_async(query_args)
             if "data" in res and res["data"]["__type"] and res["data"]["__type"]["fields"]:
                  for field in res["data"]["__type"]["fields"]:
-                     if field["name"] == "sipsData":
-                         _LOGGER.warning(f"Pablo: Arguments for sipsData: {[arg['name'] for arg in field['args']]}")
+                     if field["name"] == "measurements":
+                         _LOGGER.warning(f"Pablo: Arguments for PropertyType.measurements: {[arg['name'] for arg in field['args']]}")
         except Exception as e:
-            _LOGGER.warning(f"Pablo: Failed to inspect sipsData args: {e}")
+            _LOGGER.warning(f"Pablo: Failed to inspect measurements args: {e}")
 
         # 2. Types
         for type_name in types_to_inspect:
@@ -187,107 +187,81 @@ class OctopusSpain:
         }
 
     async def current_consumption(self, account: str, start: datetime):
-        # Step 1: Get Meter IDs (Using CUPS as proxy for Meter ID)
-        query_cups = """
-            query ($account: String!) {
+        # Step 1: Use PropertyType.measurements
+        # This is a likely candidate for readings.
+        
+        total_consumption = 0
+        now = datetime.now()
+        
+        query_measurements = """
+            query ($account: String!, $start: DateTime!, $end: DateTime!) {
               account(accountNumber: $account) {
                 properties {
-                  electricitySupplyPoints {
-                    cups
+                  measurements(from: $start, to: $end) {
+                    readAt
+                    value
+                    unit
                   }
                 }
               }
             }
         """
-        
+
+        variables = {
+            "account": account,
+            "start": start.isoformat(),
+            "end": now.isoformat()
+        }
+
         headers = {"authorization": self._token}
         client = GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
         
         try:
-             response_cups = await client.execute_async(query_cups, {"account": account})
+            response = await client.execute_async(query_measurements, variables)
         except Exception as e:
-             _LOGGER.error(f"Pablo: Error fetching CUPS: {e}")
-             return 0
-
-        if "errors" in response_cups:
-             _LOGGER.error(f"Pablo: GraphQL errors in CUPS query: {response_cups['errors']}")
-             return 0
-             
-        # Use CUPS as meter identifiers
-        meter_ids = []
-        try:
-            if "data" in response_cups and response_cups["data"]["account"]:
-                 for property in response_cups["data"]["account"]["properties"]:
-                     if "electricitySupplyPoints" in property:
-                         for point in property["electricitySupplyPoints"]:
-                             if "cups" in point:
-                                 meter_ids.append(point["cups"])
-        except Exception as e:
-            _LOGGER.error(f"Pablo: Error parsing CUPS: {e}")
-
-        if not meter_ids:
-            _LOGGER.error("Pablo: No supply points (CUPS) found for consumption query")
+            _LOGGER.error(f"Pablo: Error fetching measurements: {e}")
             return 0
 
-        # Step 2: Get Consumption via SIPS (Spain-specific data)
-        # sipsData returns monthly consumption. We will filter relevant months.
+        if "errors" in response:
+            _LOGGER.error(f"Pablo: GraphQL errors in measurements query: {response['errors']}")
+            return 0
         
-        total_consumption = 0
-        
-        # We need to specify market (likely "ELECTRICITY") and use an inline fragment because sipsData returns a Union/Interface.
-        query_sips = """
-            query ($cups: String!, $market: String!) {
-                sipsData(cups: $cups, market: $market) {
-                    ... on SIPSElectricityData {
-                        monthlyConsumptions {
-                            startDate
-                            endDate
-                            activeEnergyConsumptionWhP1
-                            activeEnergyConsumptionWhP2
-                            activeEnergyConsumptionWhP3
-                        }
-                    }
-                }
-            }
-        """
-
-        for cups_id in meter_ids:
-            # We assume "ELECTRICITY" is the correct market string based on context.
-            variables = {
-                "cups": cups_id,
-                "market": "ELECTRICITY"
-            }
-            try:
-                response = await client.execute_async(query_sips, variables)
-                
-                if "errors" in response:
-                     _LOGGER.error(f"Pablo: Errors fetching SIPS data for CUPS {cups_id}: {response['errors']}")
-                     continue
-                
-                sips_data = response.get("data", {}).get("sipsData", {})
-                if sips_data and "monthlyConsumptions" in sips_data:
-                    monthly_consumptions = sips_data["monthlyConsumptions"]
-                    
-                    for month_data in monthly_consumptions:
-                         try:
-                             # Ensure we parse dates correctly
-                             end_date_str = month_data.get("endDate")
-                             if end_date_str:
-                                 month_end = datetime.fromisoformat(end_date_str).date() if "T" in end_date_str else datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        try:
+            if "data" in response and response["data"] and response["data"]["account"] and response["data"]["account"]["properties"]:
+                 for property in response["data"]["account"]["properties"]:
+                     if "measurements" in property and property["measurements"]:
+                         measurements = property["measurements"]
+                         
+                         # Determine if measurements are cumulative or interval
+                         # Measurements typically differ by type.
+                         # We'll log the first one to debug units.
+                         if len(measurements) > 0:
+                             first = measurements[0]
+                             _LOGGER.warning(f"Pablo: Debug Measurement Sample: {first}")
+                            
+                             # Logic: If unit is kWh/Wh, sum? Or Start/End diff?
+                             # For now, simplistic sum if many items, or diff if cumulative.
+                             # If "Reading", likely cumulative?
+                             # "Value" in MeasurementType.
+                             
+                             # Let's try simple difference of first/last if sorted?
+                             # Or just sum if it looks like interval data?
+                             # Without knowing, I'll assume cumulative readings for now (like a meter).
+                             
+                             measurements.sort(key=lambda x: x["readAt"])
+                             start_val = float(measurements[0]["value"])
+                             end_val = float(measurements[-1]["value"])
+                             diff = end_val - start_val
+                             
+                             # Convert units if needed (Wh to kWh)
+                             unit = first.get("unit", "").lower()
+                             if unit == "wh":
+                                 diff = diff / 1000.0
                                  
-                                 if month_end >= start.date():
-                                     # Sum P1, P2, P3 (in Wh) and convert to kWh
-                                     p1 = float(month_data.get("activeEnergyConsumptionWhP1") or 0)
-                                     p2 = float(month_data.get("activeEnergyConsumptionWhP2") or 0)
-                                     p3 = float(month_data.get("activeEnergyConsumptionWhP3") or 0)
-                                     
-                                     total_wh = p1 + p2 + p3
-                                     total_consumption += (total_wh / 1000.0)
-                                     
-                         except Exception as ex:
-                             _LOGGER.warning(f"Pablo: Error parsing SIPS month data: {ex}")
-
-            except Exception as e:
-                _LOGGER.error(f"Pablo: Error fetching SIPS data for CUPS {cups_id}: {e}")
-
+                             if diff > 0:
+                                 total_consumption += diff
+                                 
+        except Exception as e:
+            _LOGGER.error(f"Pablo: Error parsing measurements: {e}")
+            
         return total_consumption
